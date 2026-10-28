@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#4f46e5">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>Trip Split</title>
+<style>
+  :root {
+    --bg: #f4f5fb; --card: #ffffff; --text: #1c1d2b; --muted: #6b6f85;
+    --primary: #4f46e5; --primary-text: #ffffff; --border: #e3e5f0;
+    --good: #15803d; --bad: #b91c1c; --chip: #eceefe;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12131c; --card: #1c1e2d; --text: #eceef8; --muted: #9a9eb8;
+      --primary: #7c78ff; --primary-text: #10111a; --border: #2c2f45;
+      --good: #4ade80; --bad: #f87171; --chip: #2a2d4a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  header {
+    background: var(--primary); color: var(--primary-text);
+    padding: 16px 16px 14px; padding-top: calc(16px + env(safe-area-inset-top));
+  }
+  header h1 { margin: 0; font-size: 1.3rem; }
+  header p { margin: 2px 0 0; font-size: .85rem; opacity: .85; }
+  main { max-width: 560px; margin: 0 auto; padding: 12px 16px 40px; }
+  section {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px; margin-top: 12px;
+  }
+  h2 { font-size: 1rem; margin: 0 0 10px; }
+  label.field { display: block; font-size: .8rem; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=number], select {
+    width: 100%; font-size: 1rem; padding: 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  }
+  .row { display: flex; gap: 8px; }
+  .row input { flex: 1; }
+  button {
+    font-size: 1rem; padding: 12px 16px; border-radius: 10px; border: 0;
+    background: var(--primary); color: var(--primary-text); font-weight: 600;
+  }
+  button.secondary { background: var(--chip); color: var(--text); }
+  button.danger { background: transparent; color: var(--bad); padding: 8px 10px; }
+  button.full { width: 100%; margin-top: 12px; }
+  button:disabled { opacity: .45; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .chip {
+    background: var(--chip); border-radius: 999px; padding: 8px 12px;
+    font-size: .95rem; display: inline-flex; align-items: center; gap: 8px;
+  }
+  .chip button { padding: 0 2px; background: none; color: var(--muted); font-size: 1.1rem; line-height: 1; }
+  .pick { cursor: pointer; user-select: none; }
+  .pick input { display: none; }
+  .pick.on { background: var(--primary); color: var(--primary-text); }
+  .exp { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid var(--border); }
+  .exp:first-of-type { border-top: 0; }
+  .exp small { color: var(--muted); display: block; margin-top: 2px; }
+  .amt { font-weight: 700; white-space: nowrap; }
+  .good { color: var(--good); } .bad { color: var(--bad); }
+  .line { padding: 8px 0; border-top: 1px solid var(--border); display: flex; justify-content: space-between; gap: 8px; }
+  .line:first-of-type { border-top: 0; }
+  .empty { color: var(--muted); font-size: .9rem; margin: 6px 0 0; }
+  .upirow { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .upirow strong { min-width: 64px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .upirow input { flex: 1; min-width: 0; }
+  .pay { padding: 10px 0; border-top: 1px solid var(--border); }
+  .pay:first-of-type { border-top: 0; }
+  .payhead { display: flex; justify-content: space-between; gap: 8px; }
+  .payact { display: flex; gap: 8px; margin-top: 8px; }
+  .paybtn {
+    background: var(--primary); color: var(--primary-text); text-decoration: none; font-weight: 600;
+    padding: 10px 22px; border-radius: 10px; font-size: .95rem;
+  }
+  .smallbtn { padding: 10px 14px; font-size: .9rem; }
+  .hint { display: block; color: var(--muted); margin-top: 4px; }
+  .total { color: var(--muted); font-size: .85rem; margin-top: 8px; }
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: #1c1d2b; color: #fff; padding: 10px 16px; border-radius: 999px;
+    font-size: .9rem; opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>💸 Trip Split</h1>
+  <p>Split trip expenses and settle up</p>
+</header>
+
+<main>
+  <section>
+    <h2>1. Who is on the trip?</h2>
+    <div class="row">
+      <input id="personInput" type="text" placeholder="Add a name" autocomplete="off" maxlength="30">
+      <button id="addPerson">Add</button>
+    </div>
+    <div id="people" class="chips"></div>
+  </section>
+
+  <section id="upiSection" hidden>
+    <h2>UPI IDs <span style="font-weight:400;color:var(--muted)">(optional)</span></h2>
+    <p class="empty" style="margin:0 0 4px">Add each person's UPI ID so the settle-up list gets a Pay button. Saved only on this device.</p>
+    <div id="upiList"></div>
+  </section>
+
+  <section id="expenseSection">
+    <h2>2. Add an expense</h2>
+    <p id="needPeople" class="empty">Add at least 2 people first.</p>
+    <form id="expenseForm" hidden>
+      <label class="field" for="desc">What was it for?</label>
+      <input id="desc" type="text" placeholder="Hotel, dinner, cab..." maxlength="40" autocomplete="off">
+      <label class="field" for="amount">Amount (₹)</label>
+      <input id="amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00">
+      <label class="field" for="payer">Who paid?</label>
+      <select id="payer"></select>
+      <label class="field">Shared by</label>
+      <div id="sharedBy" class="chips" style="margin-top:0"></div>
+      <button class="full" type="submit">Add expense</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Expenses</h2>
+    <div id="expenses"></div>
+    <div id="total" class="total"></div>
+  </section>
+
+  <section>
+    <h2>3. Settle up</h2>
+    <button id="calc" class="full" style="margin-top:0">Calculate</button>
+    <div id="results" hidden>
+      <h2 style="margin-top:16px">Balances</h2>
+      <div id="balances"></div>
+      <h2 style="margin-top:16px">Who pays whom</h2>
+      <div id="payments"></div>
+      <button id="share" class="full secondary">Share summary</button>
+    </div>
+  </section>
+
+  <section id="detailSection" hidden>
+    <h2>Detailed split</h2>
+    <p class="empty" style="margin:0 0 8px">Every expense is split equally among the people who shared it. The payer is owed the other people's shares.</p>
+    <h2 style="margin-top:14px">Share of each expense</h2>
+    <div id="shareList"></div>
+    <h2 style="margin-top:16px">Who owes whom (pair by pair)</h2>
+    <div id="pairList"></div>
+    <p class="empty" style="margin-top:12px">The "Who pays whom" list above combines all these pair debts into the fewest payments. Everyone ends up in exactly the same position.</p>
+  </section>
+
+  <button id="reset" class="danger full">Start a new trip</button>
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ---------- CORE-START (pure logic, money in integer paise) ----------
+function computeBalances(people, expenses) {
+  const balances = {};
+  people.forEach(p => { balances[p] = 0; });
+  expenses.forEach(e => {
+    const total = e.amountPaise;
+    const sharers = e.sharedBy;
+    balances[e.payer] += total;
+    const base = Math.floor(total / sharers.length);
+    const extra = total - base * sharers.length;   // leftover paise
+    sharers.forEach((person, i) => {
+      balances[person] -= base + (i < extra ? 1 : 0);
+    });
+  });
+  return balances;
+}
+
+function settle(balances) {
+  const creditors = [], debtors = [];
+  Object.entries(balances).forEach(([name, amt]) => {
+    if (amt > 0) creditors.push([name, amt]);
+    else if (amt < 0) debtors.push([name, -amt]);
+  });
+  const payments = [];
+  while (creditors.length && debtors.length) {
+    creditors.sort((a, b) => b[1] - a[1]);   // biggest first
+    debtors.sort((a, b) => b[1] - a[1]);
+    const c = creditors[0], d = debtors[0];
+    const pay = Math.min(c[1], d[1]);
+    payments.push({ from: d[0], to: c[0], amountPaise: pay });
+    c[1] -= pay; d[1] -= pay;
+    if (c[1] === 0) creditors.shift();
+    if (d[1] === 0) debtors.shift();
+  }
+  return payments;
+}
+// Who owes whom, pair by pair, before simplifying.
+// For each expense, every sharer (except the payer) owes the payer their share.
+function pairwise(people, expenses) {
+  const items = {};
+  people.forEach(a => { items[a] = {}; people.forEach(b => { items[a][b] = []; }); });
+  expenses.forEach(e => {
+    const n = e.sharedBy.length;
+    const base = Math.floor(e.amountPaise / n);
+    const extra = e.amountPaise - base * n;
+    e.sharedBy.forEach((s, i) => {
+      const share = base + (i < extra ? 1 : 0);
+      if (s !== e.payer) items[s][e.payer].push({ desc: e.description, amountPaise: share });
+    });
+  });
+  const sum = arr => arr.reduce((t, x) => t + x.amountPaise, 0);
+  const result = [];
+  for (let i = 0; i < people.length; i++) {
+    for (let j = i + 1; j < people.length; j++) {
+      const a = people[i], b = people[j];
+      const aOwesB = items[a][b], bOwesA = items[b][a];
+      if (!aOwesB.length && !bOwesA.length) continue;
+      result.push({ a, b, aOwesB, bOwesA, net: sum(aOwesB) - sum(bOwesA) }); // net > 0: a owes b
+    }
+  }
+  return result;
+}
+
+// Each person's share of one expense (same rounding rule as computeBalances).
+function sharesOf(e) {
+  const n = e.sharedBy.length;
+  const base = Math.floor(e.amountPaise / n);
+  const extra = e.amountPaise - base * n;
+  return e.sharedBy.map((p, i) => ({ person: p, amountPaise: base + (i < extra ? 1 : 0) }));
+}
+// UPI helpers. A UPI ID looks like name@bank (e.g. rahul@oksbi, 9876543210@ybl).
+function isValidUpi(id) {
+  return /^[a-zA-Z0-9._-]{2,64}@[a-zA-Z][a-zA-Z0-9]{1,31}$/.test(id);
+}
+
+// Builds a link that opens GPay / PhonePe / Paytm with receiver and amount filled in.
+function upiLink(upiId, receiverName, amountPaise, note) {
+  const amount = (amountPaise / 100).toFixed(2);
+  return 'upi://pay?pa=' + upiId +
+    '&pn=' + encodeURIComponent(receiverName) +
+    '&am=' + amount +
+    '&cu=INR' +
+    '&tn=' + encodeURIComponent(note || 'Trip expense');
+}
+// ---------- CORE-END ----------
+
+const $ = s => document.querySelector(s);
+const rupees = p => '₹' + (p / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem('tripsplit'));
+    if (s && Array.isArray(s.people) && Array.isArray(s.expenses)) {
+      if (!s.upi || typeof s.upi !== 'object') s.upi = {};
+      return s;
+    }
+  } catch (e) {}
+  return { people: [], expenses: [], upi: {} };
+}
+function save() { try { localStorage.setItem('tripsplit', JSON.stringify(state)); } catch (e) {} }
+
+let state = load();
+let selected = new Set(state.people);   // who is ticked in "Shared by"
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+function el(tag, props = {}, children = []) {
+  const n = document.createElement(tag);
+  Object.entries(props).forEach(([k, v]) => {
+    if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+  });
+  children.forEach(c => n.appendChild(c));
+  return n;
+}
+
+function renderPeople() {
+  const box = $('#people'); box.innerHTML = '';
+  state.people.forEach(p => {
+    box.appendChild(el('span', { class: 'chip' }, [
+      el('span', { text: p }),
+      el('button', { 'aria-label': 'Remove ' + p, text: '×', onclick: () => removePerson(p) })
+    ]));
+  });
+  renderUpi();
+  const ok = state.people.length >= 2;
+  $('#expenseForm').hidden = !ok;
+  $('#needPeople').hidden = ok;
+
+  const payer = $('#payer'); const prev = payer.value; payer.innerHTML = '';
+  state.people.forEach(p => payer.appendChild(el('option', { value: p, text: p })));
+  if (state.people.includes(prev)) payer.value = prev;
+
+  const sb = $('#sharedBy'); sb.innerHTML = '';
+  state.people.forEach(p => {
+    const on = selected.has(p);
+    const lab = el('label', { class: 'chip pick' + (on ? ' on' : ''), text: p });
+    lab.addEventListener('click', e => {
+      e.preventDefault();
+      if (selected.has(p)) selected.delete(p); else selected.add(p);
+      renderPeople();
+    });
+    sb.appendChild(lab);
+  });
+}
+
+function renderUpi() {
+  const list = $('#upiList'); list.innerHTML = '';
+  $('#upiSection').hidden = state.people.length < 2;
+  state.people.forEach(p => {
+    const input = el('input', {
+      type: 'text', placeholder: 'name@bank', autocomplete: 'off', autocapitalize: 'none',
+      spellcheck: 'false', 'aria-label': 'UPI ID for ' + p, maxlength: '80'
+    });
+    input.value = state.upi[p] || '';
+    input.addEventListener('change', () => {
+      const v = input.value.trim();
+      if (!v) { delete state.upi[p]; save(); toast('UPI ID removed'); return; }
+      if (!isValidUpi(v)) { toast('Invalid UPI ID (example: name@oksbi)'); input.value = state.upi[p] || ''; return; }
+      state.upi[p] = v; save(); toast('Saved UPI ID for ' + p);
+    });
+    list.appendChild(el('div', { class: 'upirow' }, [el('strong', { text: p }), input]));
+  });
+}
+
+function renderExpenses() {
+  const box = $('#expenses'); box.innerHTML = '';
+  if (!state.expenses.length) {
+    box.appendChild(el('p', { class: 'empty', text: 'No expenses yet.' }));
+    $('#total').textContent = '';
+    return;
+  }
+  state.expenses.forEach((e, i) => {
+    box.appendChild(el('div', { class: 'exp' }, [
+      el('div', {}, [
+        el('strong', { text: e.description }),
+        el('small', { text: e.payer + ' paid · shared by ' + (e.sharedBy.length === state.people.length ? 'everyone' : e.sharedBy.join(', ')) })
+      ]),
+      el('div', {}, [
+        el('span', { class: 'amt', text: rupees(e.amountPaise) }),
+        el('button', { class: 'danger', 'aria-label': 'Delete expense', text: '🗑', onclick: () => { state.expenses.splice(i, 1); save(); refresh(); } })
+      ])
+    ]));
+  });
+  const sum = state.expenses.reduce((a, e) => a + e.amountPaise, 0);
+  $('#total').textContent = 'Total spent: ' + rupees(sum);
+}
+
+function refresh() { renderPeople(); renderExpenses(); $('#results').hidden = true; $('#detailSection').hidden = true; $('#calc').disabled = !state.expenses.length; }
+
+function addPerson() {
+  const input = $('#personInput'); const name = input.value.trim();
+  if (!name) return;
+  if (state.people.some(p => p.toLowerCase() === name.toLowerCase())) { toast('Already added'); return; }
+  state.people.push(name); selected.add(name); input.value = ''; save(); refresh(); input.focus();
+}
+
+function removePerson(p) {
+  if (state.expenses.some(e => e.payer === p || e.sharedBy.includes(p))) {
+    toast('Delete their expenses first'); return;
+  }
+  state.people = state.people.filter(x => x !== p); selected.delete(p); delete state.upi[p]; save(); refresh();
+}
+
+let lastSummary = '';
+function calculate() {
+  const balances = computeBalances(state.people, state.expenses);
+  const payments = settle(balances);
+
+  const b = $('#balances'); b.innerHTML = '';
+  state.people.forEach(p => {
+    const a = balances[p];
+    const txt = a > 0 ? 'gets ' + rupees(a) : a < 0 ? 'pays ' + rupees(-a) : 'settled';
+    b.appendChild(el('div', { class: 'line' }, [
+      el('strong', { text: p }),
+      el('span', { class: a > 0 ? 'good' : a < 0 ? 'bad' : '', text: txt })
+    ]));
+  });
+
+  const pm = $('#payments'); pm.innerHTML = '';
+  const lines = [];
+  if (!payments.length) {
+    pm.appendChild(el('p', { class: 'empty', text: 'Everyone is settled. No payments needed!' }));
+  } else {
+    payments.forEach(p => {
+      const upiId = state.upi[p.to];
+      const actions = [];
+      if (upiId) {
+        actions.push(el('a', {
+          class: 'paybtn', text: 'Pay',
+          href: upiLink(upiId, p.to, p.amountPaise, 'Trip expense: ' + p.from + ' to ' + p.to),
+          onclick: () => { if (!/Android|iPhone|iPad/i.test(navigator.userAgent)) toast('Open this on your phone to pay'); }
+        }));
+        actions.push(el('button', {
+          class: 'secondary smallbtn', text: 'Copy ID',
+          onclick: async () => { try { await navigator.clipboard.writeText(upiId); toast('UPI ID copied'); } catch (e) { toast(upiId); } }
+        }));
+      }
+      pm.appendChild(el('div', { class: 'pay' }, [
+        el('div', { class: 'payhead' }, [
+          el('span', { text: p.from + ' → ' + p.to }),
+          el('strong', { text: rupees(p.amountPaise) })
+        ]),
+        upiId
+          ? el('div', { class: 'payact' }, actions)
+          : el('small', { class: 'hint', text: 'Add ' + p.to + "'s UPI ID above to enable Pay" })
+      ]));
+      lines.push(p.from + ' pays ' + p.to + ' ' + rupees(p.amountPaise));
+    });
+  }
+  const sum = state.expenses.reduce((a, e) => a + e.amountPaise, 0);
+  lastSummary = 'Trip Split - total ' + rupees(sum) + '\n' + (lines.length ? lines.join('\n') : 'Everyone is settled.');
+  $('#results').hidden = false;
+  renderDetails();
+  $('#results').scrollIntoView({ behavior: 'smooth' });
+}
+
+function renderDetails() {
+  const sl = $('#shareList'); sl.innerHTML = '';
+  state.expenses.forEach(e => {
+    const shares = sharesOf(e).map(s => s.person + ' ' + rupees(s.amountPaise)).join(', ');
+    sl.appendChild(el('div', { class: 'exp' }, [
+      el('div', {}, [
+        el('strong', { text: e.description + ' · ' + rupees(e.amountPaise) }),
+        el('small', { text: 'Paid by ' + e.payer + '. Shares: ' + shares })
+      ])
+    ]));
+  });
+
+  const pl = $('#pairList'); pl.innerHTML = '';
+  const pairs = pairwise(state.people, state.expenses);
+  if (!pairs.length) {
+    pl.appendChild(el('p', { class: 'empty', text: 'No debts between people.' }));
+  }
+  pairs.forEach(p => {
+    const kids = [];
+    p.aOwesB.forEach(x => kids.push(el('small', { text: p.a + ' owes ' + p.b + ' ' + rupees(x.amountPaise) + ' (' + x.desc + ')' })));
+    p.bOwesA.forEach(x => kids.push(el('small', { text: p.b + ' owes ' + p.a + ' ' + rupees(x.amountPaise) + ' (' + x.desc + ')' })));
+    const net = p.net === 0 ? 'Net: even, nobody pays'
+      : p.net > 0 ? 'Net: ' + p.a + ' owes ' + p.b + ' ' + rupees(p.net)
+      : 'Net: ' + p.b + ' owes ' + p.a + ' ' + rupees(-p.net);
+    pl.appendChild(el('div', { class: 'exp' }, [
+      el('div', {}, [el('strong', { text: p.a + ' & ' + p.b }), ...kids]),
+      el('strong', { class: 'amt', text: net.replace('Net: ', '') })
+    ]));
+  });
+  $('#detailSection').hidden = false;
+}
+
+async function shareSummary() {
+  try {
+    if (navigator.share) { await navigator.share({ text: lastSummary }); return; }
+    await navigator.clipboard.writeText(lastSummary); toast('Copied to clipboard');
+  } catch (e) { /* user cancelled share */ }
+}
+
+$('#addPerson').addEventListener('click', addPerson);
+$('#personInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addPerson(); } });
+
+$('#expenseForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const amountPaise = Math.round(parseFloat($('#amount').value) * 100);
+  const sharedBy = state.people.filter(p => selected.has(p));
+  if (!(amountPaise > 0)) { toast('Enter a valid amount'); return; }
+  if (!sharedBy.length) { toast('Pick who shared it'); return; }
+  state.expenses.push({
+    description: $('#desc').value.trim() || 'Expense',
+    payer: $('#payer').value, amountPaise, sharedBy
+  });
+  $('#desc').value = ''; $('#amount').value = '';
+  save(); refresh(); toast('Expense added');
+});
+
+$('#calc').addEventListener('click', calculate);
+$('#share').addEventListener('click', shareSummary);
+$('#reset').addEventListener('click', () => {
+  if (confirm('Clear all people and expenses?')) {
+    state = { people: [], expenses: [], upi: {} }; selected = new Set(); save(); refresh();
+  }
+});
+
+refresh();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
+</script>
+</body>
+</html>
