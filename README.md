@@ -1,4 +1,4 @@
-# Trip-expense
+# Trip-Expense
 
 A simple, mobile-friendly app to split shared trip expenses and settle up with the fewest payments.
 Installable on Android as a Progressive Web App (PWA) and works offline.
