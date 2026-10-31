@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /trips/{tripId} {
+      // Anyone who knows the 8-character trip code can open that one trip.
+      allow get: if true;
+      // Nobody can list all trips, so codes cannot be discovered.
+      allow list: if false;
+      allow create, update: if request.resource.data.keys().hasOnly(['people', 'expenses', 'upi', 'paid'])
+        && request.resource.data.people is list
+        && request.resource.data.people.size() <= 30
+        && request.resource.data.expenses is list
+        && request.resource.data.expenses.size() <= 500;
+      allow delete: if false;
+    }
+  }
+}
