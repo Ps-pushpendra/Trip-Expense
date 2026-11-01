@@ -84,6 +84,7 @@
   }
   .smallbtn { padding: 10px 14px; font-size: .9rem; }
   .hint { display: block; color: var(--muted); margin-top: 4px; }
+  .curtrip { border-left: 3px solid var(--primary); padding-left: 10px; }
   .hint.good { color: var(--good); font-weight: 600; }
   .code {
     font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1.6rem; font-weight: 700;
@@ -107,6 +108,14 @@
 </header>
 
 <main>
+  <section id="historySection">
+    <h2>🧳 My trips</h2>
+    <label class="field" for="tripName" style="margin-top:0">Name of the open trip</label>
+    <input id="tripName" type="text" maxlength="40" placeholder="e.g. Goa trip" autocomplete="off">
+    <div id="tripList" style="margin-top:8px"></div>
+    <button id="newTrip" class="full secondary">+ New trip</button>
+  </section>
+
   <section id="shareSection">
     <h2>👥 Share with friends</h2>
     <div id="shareOff">
@@ -191,7 +200,7 @@
     <p class="empty" style="margin-top:12px">The "Who pays whom" list above combines all these pair debts into the fewest payments. Everyone ends up in exactly the same position.</p>
   </section>
 
-  <button id="reset" class="danger full">Start a new trip</button>
+  <button id="reset" class="danger full">Delete this trip</button>
 </main>
 
 <div id="toast"></div>
@@ -286,7 +295,8 @@ function upiLink(upiId, receiverName, amountPaise, note) {
 const $ = s => document.querySelector(s);
 const rupees = p => '₹' + (p / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const LS_KEY = 'tripsplit';
+const LS_KEY = 'tripsplit';          // old single-trip storage (migrated once)
+const LS_V2 = 'tripsplit_v2';        // all saved trips
 const LS_ME = 'tripsplit_me';
 
 function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
@@ -321,11 +331,40 @@ function normalize(s) {
   return { people, expenses, upi, paid };
 }
 
-function loadLocal() {
-  let s = null;
-  try { s = JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) {}
-  const code = s && typeof s.tripCode === 'string' && /^[A-Z0-9]{8}$/.test(s.tripCode) ? s.tripCode : null;
-  return { st: normalize(s), code };
+// ---------- Saved trips (history on this phone) ----------
+const validCode = c => typeof c === 'string' && /^[A-Z0-9]{8}$/.test(c);
+function autoName(t) {
+  return 'Trip · ' + new Date(t.created).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+const tripName = t => t.name || autoName(t);
+function makeTrip(data, code) {
+  const now = Date.now();
+  return { id: uid(), name: '', code: code || null, created: now, updated: now, data };
+}
+function cleanTrip(t) {
+  if (!t || typeof t !== 'object') return null;
+  const now = Date.now();
+  return {
+    id: typeof t.id === 'string' && t.id ? t.id : uid(),
+    name: typeof t.name === 'string' ? t.name.slice(0, 40) : '',
+    code: validCode(t.code) ? t.code : null,
+    created: Number.isFinite(t.created) ? t.created : now,
+    updated: Number.isFinite(t.updated) ? t.updated : now,
+    data: normalize(t.data)
+  };
+}
+function loadAll() {
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(LS_V2)); } catch (e) {}
+  if (raw && Array.isArray(raw.trips)) {
+    const list = raw.trips.map(cleanTrip).filter(Boolean);
+    if (list.length) return { trips: list, currentId: list.some(t => t.id === raw.currentId) ? raw.currentId : list[0].id };
+  }
+  // First run after this update: the single old trip becomes the first saved trip.
+  let old = null;
+  try { old = JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) {}
+  const t = makeTrip(normalize(old), old && validCode(old.tripCode) ? old.tripCode : null);
+  return { trips: [t], currentId: t.id };
 }
 
 // ---------- Cloud (Firebase Firestore) ----------
@@ -390,16 +429,22 @@ const firestoreApi = {
 const api = window.__cloudApi || firestoreApi;   // __cloudApi is only used by automated tests
 
 // ---------- State ----------
-const boot = loadLocal();
-let state = boot.st;
+const boot = loadAll();
+let trips = boot.trips;
+let currentId = boot.currentId;
+const cur = () => trips.find(t => t.id === currentId);
+let state = cur().data;                 // the trip that is open right now
 let selected = new Set(state.people);   // who is ticked in "Shared by"
 let resultsOpen = false;
 let me = '';
 try { me = localStorage.getItem(LS_ME) || ''; } catch (e) {}
-const cloud = { code: boot.code, unsub: null };
+const cloud = { code: cur().code, unsub: null };
 
 function persist() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ ...state, tripCode: cloud.code })); } catch (e) {}
+  const t = cur();
+  if (t) { t.data = state; t.code = cloud.code; t.updated = Date.now(); }
+  if (trips.length > 40) { trips.sort((a, b) => b.updated - a.updated); trips = trips.slice(0, 40); }  // keep the 40 most recent
+  try { localStorage.setItem(LS_V2, JSON.stringify({ currentId, trips })); } catch (e) {}
 }
 
 function toast(msg) {
@@ -448,7 +493,7 @@ async function attach(code) {
   cloud.code = code;
   persist();
   setSync('Connecting...');
-  cloud.unsub = api.subscribe(code, onRemote, () => setSync('Cannot connect. Check internet.'));
+  cloud.unsub = api.subscribe(code, d => { if (cloud.code === code) onRemote(d); }, () => setSync('Cannot connect. Check internet.'));
   renderShare();
 }
 
@@ -479,20 +524,61 @@ async function joinTrip(raw) {
   if (code.length !== 8) { toast('A trip code has 8 characters'); return; }
   if (!cloudEnabled()) { toast('Sharing is not set up yet (see SETUP.md)'); return; }
   if (cloud.code === code) return;
-  if ((state.people.length || state.expenses.length) &&
-      !confirm('Joining replaces the trip on this phone with the shared trip. Continue?')) return;
+  const existing = trips.find(t => t.code === code);
+  if (existing) { switchTo(existing.id); toast('Opened your saved trip'); return; }
   try {
     if (!(await api.exists(code))) { toast('No trip found with that code'); return; }
-    await attach(code);
+    addAndOpen(makeTrip(normalize({}), code));
     toast('Joined the shared trip');
   } catch (e) { toast('Could not join. Check your internet.'); }
 }
 
-function leaveTrip(clearLocal) {
+// Stop syncing; a copy of the trip stays on this phone.
+function leaveTrip() {
   if (cloud.unsub) { cloud.unsub(); cloud.unsub = null; }
   cloud.code = null;
-  if (clearLocal) { state = normalize({}); selected = new Set(); resultsOpen = false; }
   persist(); refresh();
+}
+
+// Make the trip chosen by currentId the open one.
+function loadCurrent() {
+  if (cloud.unsub) { cloud.unsub(); cloud.unsub = null; }
+  const t = cur();
+  state = t.data; cloud.code = t.code; selected = new Set(state.people); resultsOpen = false;
+  refresh();
+  if (cloud.code) attach(cloud.code); else persist();
+}
+function switchTo(id) {
+  if (id === currentId || !trips.some(t => t.id === id)) return;
+  persist();                    // save the trip we are leaving
+  currentId = id;
+  loadCurrent();
+}
+function addAndOpen(t) {
+  persist();
+  const prev = cur();
+  trips.push(t); currentId = t.id;
+  // an untouched empty trip is not worth keeping in history
+  if (prev && !prev.code && !prev.data.people.length && !prev.data.expenses.length) trips = trips.filter(x => x !== prev);
+  loadCurrent();
+}
+function newTrip() {
+  if (!cloud.code && !state.people.length && !state.expenses.length) { toast('This trip is still empty'); return; }
+  addAndOpen(makeTrip(normalize({}), null));
+  toast('New trip started. The old one is saved in My trips');
+}
+function deleteTrip(id) {
+  const t = trips.find(x => x.id === id);
+  if (!t) return;
+  if (!confirm('Remove "' + tripName(t) + '" from this phone?' + (t.code ? ' Your friends keep their copy.' : ' This cannot be undone.'))) return;
+  const wasCurrent = id === currentId;
+  trips = trips.filter(x => x.id !== id);
+  if (wasCurrent) {
+    if (!trips.length) trips.push(makeTrip(normalize({}), null));
+    trips.sort((a, b) => b.updated - a.updated);
+    currentId = trips[0].id;
+    loadCurrent();
+  } else { persist(); renderHistory(); }
 }
 
 async function shareLink() {
@@ -590,8 +676,32 @@ function renderExpenses() {
   $('#total').textContent = 'Total spent: ' + rupees(sum);
 }
 
+function renderHistory() {
+  const nm = $('#tripName');
+  if (document.activeElement !== nm) nm.value = cur().name;
+  nm.placeholder = autoName(cur());
+  const list = $('#tripList'); list.innerHTML = '';
+  if (trips.length < 2) {
+    list.appendChild(el('p', { class: 'empty', text: 'Trips you create or open are saved here on this phone.' }));
+    return;
+  }
+  [...trips].sort((a, b) => b.updated - a.updated).forEach(t => {
+    const total = t.data.expenses.reduce((a, e) => a + e.amountPaise, 0);
+    const sub = [t.data.people.length + ' people', rupees(total), t.code ? 'Shared' : 'Only on this phone',
+      new Date(t.updated).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })].join(' · ');
+    const isCur = t.id === currentId;
+    list.appendChild(el('div', { class: 'exp' + (isCur ? ' curtrip' : '') }, [
+      el('div', {}, [el('strong', { text: tripName(t) + (isCur ? ' (open)' : '') }), el('small', { text: sub })]),
+      el('div', {}, [
+        ...(isCur ? [] : [el('button', { class: 'secondary smallbtn', text: 'Open', onclick: () => switchTo(t.id) })]),
+        el('button', { class: 'danger', 'aria-label': 'Remove trip', text: '🗑', onclick: () => deleteTrip(t.id) })
+      ])
+    ]));
+  });
+}
+
 function refresh() {
-  renderShare(); renderPeople(); renderExpenses();
+  renderHistory(); renderShare(); renderPeople(); renderExpenses();
   $('#calc').disabled = !state.expenses.length;
   if (resultsOpen && state.expenses.length) renderResults(false);
   else { resultsOpen = false; $('#results').hidden = true; $('#detailSection').hidden = true; }
@@ -767,15 +877,11 @@ $('#joinCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.pre
 $('#copyLink').addEventListener('click', copyLink);
 $('#shareLink').addEventListener('click', shareLink);
 $('#leaveTrip').addEventListener('click', () => {
-  if (confirm('Leave the shared trip? Your friends keep their copy. This phone keeps a snapshot.')) leaveTrip(false);
+  if (confirm('Stop syncing this trip? Your friends keep it, and a copy stays on this phone.')) leaveTrip();
 });
-$('#reset').addEventListener('click', () => {
-  if (cloud.code) {
-    if (confirm('Leave the shared trip and clear this phone? Your friends keep the trip.')) leaveTrip(true);
-  } else if (confirm('Clear all people and expenses?')) {
-    state = normalize({}); selected = new Set(); resultsOpen = false; persist(); refresh();
-  }
-});
+$('#reset').addEventListener('click', () => deleteTrip(currentId));
+$('#newTrip').addEventListener('click', newTrip);
+$('#tripName').addEventListener('input', e => { cur().name = e.target.value.trim().slice(0, 40); persist(); renderHistory(); });
 
 refresh();
 
